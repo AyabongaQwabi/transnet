@@ -105,7 +105,7 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   useEffect(() => {
     const timer = setInterval(() => {
       console.log('refreshing interval...');
-      getInterruptions();
+
       const now = new Date();
       setCurrentTime(now);
 
