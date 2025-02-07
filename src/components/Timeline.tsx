@@ -1,10 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Train, User, AlertTriangle, Play, Pause, MapPin, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
+import {
+  Clock,
+  Train,
+  User,
+  AlertTriangle,
+  Play,
+  Pause,
+  MapPin,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
 import { InterruptionModal } from './InterruptionModal';
 import { useJourney } from '../hooks/useJourney';
-import { format, addSeconds, startOfMinute, addMinutes, isValid } from 'date-fns';
+import {
+  format,
+  addSeconds,
+  startOfMinute,
+  addMinutes,
+  isValid,
+} from 'date-fns';
 import moment from 'moment';
-import { isEmpty, isNil, keys, sort, toPairs, pipe, values, sortBy, sortWith } from 'ramda';
+import {
+  isEmpty,
+  isNil,
+  keys,
+  sort,
+  toPairs,
+  pipe,
+  values,
+  sortBy,
+  sortWith,
+} from 'ramda';
 
 const exists = (i) => !isEmpty(i) && !isNil(i);
 
@@ -17,7 +44,9 @@ const formatDuration = (minutes) => {
   const normalizedMinutes = minutes % (24 * 60);
   const hours = Math.floor(normalizedMinutes / 60);
   const mins = normalizedMinutes % 60;
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+  return `${hours.toString().padStart(2, '0')}:${mins
+    .toString()
+    .padStart(2, '0')}`;
 };
 
 const addMinutesToTime = (time, minutes) => {
@@ -37,7 +66,8 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   const [expectedStation, setExpectedStation] = useState(null);
   const [trainEvents, setTrainEvents] = useState([]);
   const [expandedSegments, setExpandedSegments] = useState(new Set());
-  
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
   const trainStartMovementTime = stations[0].departureTime;
 
   const {
@@ -56,8 +86,25 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   } = useJourney({ trainCode, stations });
 
   useEffect(() => {
+    if (isInitialLoad && trainEvents && Object.keys(trainEvents).length > 0) {
+      const currentMoment = moment();
+      const newExpandedSegments = new Set();
+
+      Object.keys(trainEvents).forEach((timeSegment) => {
+        const segmentTime = moment(timeSegment, 'HH:mm');
+        if (segmentTime.isAfter(currentMoment)) {
+          newExpandedSegments.add(timeSegment);
+        }
+      });
+
+      setExpandedSegments(newExpandedSegments);
+      setIsInitialLoad(false);
+    }
+  }, [trainEvents, isInitialLoad]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
-      console.log("refreshing interval...")
+      console.log('refreshing interval...');
       getInterruptions();
       const now = new Date();
       setCurrentTime(now);
@@ -69,13 +116,13 @@ export const Timeline = ({ stations, trainCode, crew }) => {
         const nextStationTime = nextStation
           ? getTimeInMinutes(nextStation.arrivalTime)
           : Infinity;
-        return currentMinutes >= stationTime && currentMinutes < nextStationTime;
+        return (
+          currentMinutes >= stationTime && currentMinutes < nextStationTime
+        );
       });
 
       setExpectedStation(expected);
-      
-      
-      
+
       if (expectedStation) {
         const stationIndex = stations.findIndex(
           (s) => s.code === expectedStation.code
@@ -97,53 +144,39 @@ export const Timeline = ({ stations, trainCode, crew }) => {
           }
         }
       }
-      
+
       createTimelineEvents();
     }, 5000);
-    
+
     return () => clearInterval(timer);
   }, [expectedStation, stations, reachedStations]);
 
   const handleInterruption = async (reason) => {
-    console.log("recording interruption...")
+    console.log('recording interruption...');
     await recordInterruption(reason);
     setIsModalOpen(false);
-    await getInterruptions()
-    createTimelineEvents()
+    await getInterruptions();
+    createTimelineEvents();
   };
 
   const toggleSegment = (timeSegment) => {
-    const newExpandedSegments = new Set(expandedSegments);
-    if (newExpandedSegments.has(timeSegment)) {
-      newExpandedSegments.delete(timeSegment);
-    } else {
-      newExpandedSegments.add(timeSegment);
-    }
-    setExpandedSegments(newExpandedSegments);
+    setExpandedSegments((prev) => {
+      const newExpandedSegments = new Set(prev);
+      if (newExpandedSegments.has(timeSegment)) {
+        newExpandedSegments.delete(timeSegment);
+      } else {
+        newExpandedSegments.add(timeSegment);
+      }
+      return newExpandedSegments;
+    });
   };
-
-  useEffect(() => {
-    if (trainEvents && Object.keys(trainEvents).length > 0) {
-      const currentMoment = moment();
-      const newExpandedSegments = new Set();
-      
-      Object.keys(trainEvents).forEach(timeSegment => {
-        const segmentTime = moment(timeSegment, 'HH:mm');
-        if (segmentTime.isAfter(currentMoment)) {
-          newExpandedSegments.add(timeSegment);
-        }
-      });
-      
-      setExpandedSegments(newExpandedSegments);
-    }
-  }, [trainEvents]);
 
   if (!stations?.length || !crew?.length) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-pulse flex flex-col items-center">
-          <Train className="w-12 h-12 text-blue-500 mb-4" />
-          <p className="text-gray-600">Loading journey information...</p>
+      <div className='min-h-screen flex items-center justify-center bg-gray-50'>
+        <div className='animate-pulse flex flex-col items-center'>
+          <Train className='w-12 h-12 text-blue-500 mb-4' />
+          <p className='text-gray-600'>Loading journey information...</p>
         </div>
       </div>
     );
@@ -181,7 +214,7 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   const normalizeTimeRelativeToStart = (time, startTime) => {
     const [startHours] = startTime.split(':').map(Number);
     const [hours, minutes] = time.split(':').map(Number);
-    
+
     if (hours < startHours) {
       return (hours + 24) * 60 + minutes;
     }
@@ -205,7 +238,7 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   };
 
   const createTimelineEvents = () => {
-    console.log("create timeline events...")
+    console.log('create timeline events...');
     const interruptionEvents = interruptions
       ? interruptions?.flatMap((interruption) => {
           const startTimeStr = moment(interruption.start_time).format('HH:mm');
@@ -216,14 +249,20 @@ export const Timeline = ({ stations, trainCode, crew }) => {
           return [
             {
               time: startTimeStr,
-              normalizedTime: normalizeTimeRelativeToStart(startTimeStr, trainStartMovementTime),
+              normalizedTime: normalizeTimeRelativeToStart(
+                startTimeStr,
+                trainStartMovementTime
+              ),
               type: 'start',
               category: 'interruption',
               interruption,
             },
             {
               time: endTimeStr,
-              normalizedTime: normalizeTimeRelativeToStart(endTimeStr, trainStartMovementTime),
+              normalizedTime: normalizeTimeRelativeToStart(
+                endTimeStr,
+                trainStartMovementTime
+              ),
               type: 'end',
               category: 'interruption',
               interruption,
@@ -239,14 +278,20 @@ export const Timeline = ({ stations, trainCode, crew }) => {
               return [
                 {
                   time: station.arrivalTime,
-                  normalizedTime: normalizeTimeRelativeToStart(station.arrivalTime, trainStartMovementTime),
+                  normalizedTime: normalizeTimeRelativeToStart(
+                    station.arrivalTime,
+                    trainStartMovementTime
+                  ),
                   type: 'arrival',
                   category: 'station',
                   station,
                 },
                 {
                   time: station.departureTime,
-                  normalizedTime: normalizeTimeRelativeToStart(station.departureTime, trainStartMovementTime),
+                  normalizedTime: normalizeTimeRelativeToStart(
+                    station.departureTime,
+                    trainStartMovementTime
+                  ),
                   type: 'departure',
                   category: 'station',
                   station,
@@ -267,7 +312,10 @@ export const Timeline = ({ stations, trainCode, crew }) => {
         return acc;
       }
 
-      const minutes = normalizeTimeRelativeToStart(event.time, trainStartMovementTime);
+      const minutes = normalizeTimeRelativeToStart(
+        event.time,
+        trainStartMovementTime
+      );
       const roundedMinutes = Math.floor(minutes / 30) * 30;
       const segmentKey = formatDuration(roundedMinutes);
 
@@ -297,24 +345,26 @@ export const Timeline = ({ stations, trainCode, crew }) => {
   }, [journeyId, interruptions, groupedStations]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className='min-h-screen bg-gray-50'>
       <InterruptionModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onConfirm={handleInterruption}
       />
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8 transition-all duration-300 hover:shadow-xl">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-6">
-              <div className="bg-transnet-green/10 p-4 rounded-lg">
-                <Train className="w-10 h-10 text-transnet-green" />
+      <div className='max-w-7xl mx-auto px-4 py-8'>
+        <div className='bg-white rounded-xl shadow-lg p-6 mb-8 transition-all duration-300 hover:shadow-xl'>
+          <div className='flex items-center justify-between mb-6'>
+            <div className='flex items-center space-x-6'>
+              <div className='bg-transnet-green/10 p-4 rounded-lg'>
+                <Train className='w-10 h-10 text-transnet-green' />
               </div>
               <div>
-                <h2 className="text-3xl font-bold text-transnet-red">Journey Status</h2>
-                <div className="flex items-center mt-2 text-transnet-gray">
-                  <MapPin className="w-4 h-4 mr-2" />
+                <h2 className='text-3xl font-bold text-transnet-red'>
+                  Journey Status
+                </h2>
+                <div className='flex items-center mt-2 text-transnet-gray'>
+                  <MapPin className='w-4 h-4 mr-2' />
                   <p>
                     {expectedStation
                       ? `Currently at: ${expectedStation.name}`
@@ -323,52 +373,58 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center space-x-4">
-              <div className="bg-transnet-green/10 px-6 py-3 rounded-lg flex items-center">
-                <Clock className="w-5 h-5 text-transnet-green mr-3" />
-                <span className="font-medium text-transnet-gray">{format(currentTime, 'HH:mm:ss')}</span>
+
+            <div className='flex items-center space-x-4'>
+              <div className='bg-transnet-green/10 px-6 py-3 rounded-lg flex items-center'>
+                <Clock className='w-5 h-5 text-transnet-green mr-3' />
+                <span className='font-medium text-transnet-gray'>
+                  {format(currentTime, 'HH:mm:ss')}
+                </span>
               </div>
-              
+
               {totalDelay > 0 && (
-                <div className="bg-transnet-red/10 px-6 py-3 rounded-lg flex items-center">
-                  <AlertTriangle className="w-5 h-5 text-transnet-red mr-3" />
-                  <span className="font-medium text-transnet-red">Delay: {totalDelay} min</span>
+                <div className='bg-transnet-red/10 px-6 py-3 rounded-lg flex items-center'>
+                  <AlertTriangle className='w-5 h-5 text-transnet-red mr-3' />
+                  <span className='font-medium text-transnet-red'>
+                    Delay: {totalDelay} min
+                  </span>
                 </div>
               )}
-              
+
               {activeInterruption ? (
                 <button
                   onClick={() => endCurrentInteruption()}
-                  className="flex items-center space-x-2 px-6 py-3 bg-transnet-green text-white rounded-lg hover:bg-[#7ab522] transition-colors duration-200"
+                  className='flex items-center space-x-2 px-6 py-3 bg-transnet-green text-white rounded-lg hover:bg-[#7ab522] transition-colors duration-200'
                 >
-                  <Play className="w-5 h-5" />
-                  <span className="font-medium">Resume Journey</span>
+                  <Play className='w-5 h-5' />
+                  <span className='font-medium'>Resume Journey</span>
                 </button>
               ) : (
                 <button
                   onClick={() => setIsModalOpen(true)}
-                  className="flex items-center space-x-2 px-6 py-3 bg-transnet-red text-white rounded-lg hover:bg-[#df3325] transition-colors duration-200"
+                  className='flex items-center space-x-2 px-6 py-3 bg-transnet-red text-white rounded-lg hover:bg-[#df3325] transition-colors duration-200'
                 >
-                  <Pause className="w-5 h-5" />
-                  <span className="font-medium">Interrupt Train</span>
+                  <Pause className='w-5 h-5' />
+                  <span className='font-medium'>Interrupt Train</span>
                 </button>
               )}
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-6">
+          <div className='grid grid-cols-3 gap-6'>
             {crew.map((member) => (
               <div
                 key={member.id}
-                className="bg-gray-50 rounded-lg p-4 flex items-center space-x-4 transition-all duration-200 hover:bg-gray-100"
+                className='bg-gray-50 rounded-lg p-4 flex items-center space-x-4 transition-all duration-200 hover:bg-gray-100'
               >
-                <div className="bg-white p-3 rounded-md shadow-sm">
-                  <User className="w-8 h-8 text-transnet-green" />
+                <div className='bg-white p-3 rounded-md shadow-sm'>
+                  <User className='w-8 h-8 text-transnet-green' />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-transnet-gray">{member.name}</h3>
-                  <p className="text-sm text-gray-600">
+                  <h3 className='font-semibold text-transnet-gray'>
+                    {member.name}
+                  </h3>
+                  <p className='text-sm text-gray-600'>
                     {member.role} - {member.shift} Shift
                   </p>
                 </div>
@@ -377,7 +433,7 @@ export const Timeline = ({ stations, trainCode, crew }) => {
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className='space-y-4'>
           {Object.entries(trainEvents).map(([timeSegment, segmentStations]) => {
             const segmentTime = moment(timeSegment, 'HH:mm');
             const currentTime = moment();
@@ -397,21 +453,22 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                     isPastSegment ? 'bg-transnet-gray' : 'bg-transnet-red'
                   } text-white py-4 px-6 flex items-center justify-between transition-colors duration-200 hover:opacity-90`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <Calendar className="w-5 h-5" />
-                    <h2 className="text-lg font-bold">
-                      {timeSegment} - {formatDuration(getTimeInMinutes(timeSegment) + 30)}
+                  <div className='flex items-center space-x-3'>
+                    <Calendar className='w-5 h-5' />
+                    <h2 className='text-lg font-bold'>
+                      {timeSegment} -{' '}
+                      {formatDuration(getTimeInMinutes(timeSegment) + 30)}
                     </h2>
                   </div>
                   {isExpanded ? (
-                    <ChevronDown className="w-5 h-5" />
+                    <ChevronDown className='w-5 h-5' />
                   ) : (
-                    <ChevronRight className="w-5 h-5" />
+                    <ChevronRight className='w-5 h-5' />
                   )}
                 </button>
-                
+
                 {isExpanded && (
-                  <div className="p-6 space-y-4">
+                  <div className='p-6 space-y-4'>
                     {segmentStations.map((event, index) => {
                       const eventTime = moment(event.time, 'HH:mm');
                       const currentTime = moment();
@@ -425,22 +482,24 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                               ? 'bg-transnet-gray text-white'
                               : isEventPast && event.category === 'interruption'
                               ? 'bg-transnet-red/10'
-                              : !isEventPast && event.category === 'interruption'
+                              : !isEventPast &&
+                                event.category === 'interruption'
                               ? 'bg-transnet-red/10'
                               : 'bg-transnet-green/10'
                           }`}
                         >
-                          <div className="flex justify-between items-center">
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-4">
-                                <h3 className="font-semibold text-lg">
+                          <div className='flex justify-between items-center'>
+                            <div className='space-y-2'>
+                              <div className='flex items-center space-x-4'>
+                                <h3 className='font-semibold text-lg'>
                                   {event.category === 'station'
                                     ? event.station.name
                                     : 'Train Interruption'}
                                 </h3>
                                 <span
                                   className={`text-xs font-medium px-3 py-1 rounded-full ${
-                                    event.type === 'arrival' || event.type === 'start'
+                                    event.type === 'arrival' ||
+                                    event.type === 'start'
                                       ? 'bg-transnet-green text-white'
                                       : 'bg-yellow-500 text-white'
                                   }`}
@@ -448,12 +507,19 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                                   {event.type}
                                 </span>
                               </div>
-                              <p className={`text-sm ${isEventPast ? 'text-gray-300' : 'text-gray-600'}`}>
+                              <p
+                                className={`text-sm ${
+                                  isEventPast
+                                    ? 'text-gray-300'
+                                    : 'text-gray-600'
+                                }`}
+                              >
                                 {event.time}
                               </p>
                               {event.category === 'interruption' && (
-                                <p className="text-sm text-transnet-red mt-2">
-                                  Reason: {event.interruption.interruption_reason}
+                                <p className='text-sm text-transnet-red mt-2'>
+                                  Reason:{' '}
+                                  {event.interruption.interruption_reason}
                                 </p>
                               )}
                             </div>
