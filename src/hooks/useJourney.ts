@@ -18,7 +18,6 @@ export function useJourney({ trainCode, stations }) {
   const [activeInterruptionTimer, setActiveInterruptionTimer] = useState(null);
 
   const initializeJourney = async () => {
-    // First, complete any old in-progress journeys
     console.log('==> [Initialize Journey]');
     console.log(
       '==> [Initialize Journey] Completing old in-progress journeys...'
@@ -33,7 +32,6 @@ export function useJourney({ trainCode, stations }) {
         new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       );
 
-    // Get the most recent in-progress journey
     console.log(
       '==> [Initialize Journey] Getting most recent in-progress journey...'
     );
@@ -44,8 +42,9 @@ export function useJourney({ trainCode, stations }) {
       .eq('status', 'In Progress')
       .order('created_at', { ascending: false })
       .limit(1);
+
     console.log(
-      '==> [Initialize Journey]  Existing Journeys:',
+      '==> [Initialize Journey] Existing Journeys:',
       existingJourneys
     );
     if (existingJourneys && existingJourneys.length > 0) {
@@ -66,7 +65,6 @@ export function useJourney({ trainCode, stations }) {
       console.log(
         '==> [Initialize Journey] No existing journey and no current Station'
       );
-      //startNewJourney(stations[0]);
     }
   };
 
@@ -79,8 +77,8 @@ export function useJourney({ trainCode, stations }) {
       .eq('journey_id', journeyId)
       .order('start_time', { ascending: true });
 
-    setInterruptions(data);
-    const total = data.reduce(
+    setInterruptions(data || []);
+    const total = (data || []).reduce(
       (acc, curr) => acc + (curr.time_delayed_in_seconds || 0),
       0
     );
@@ -92,7 +90,6 @@ export function useJourney({ trainCode, stations }) {
     initializeJourney();
   }, [trainCode, stations]);
 
-  // Subscribe to interruptions
   useEffect(() => {
     if (!journeyId) return;
     console.log('==> Subscribing to interruptions for journey:', journeyId);
@@ -110,10 +107,8 @@ export function useJourney({ trainCode, stations }) {
           console.log(
             '==> [Interruptions] Change detected for journery:',
             journeyId
-          ),
-            console.log(
-              '==> [Interruptions] Fetching interruptions for journey'
-            );
+          );
+          console.log('==> [Interruptions] Fetching interruptions for journey');
           const { data } = await supabase
             .from('journey_interruptions')
             .select()
@@ -129,7 +124,7 @@ export function useJourney({ trainCode, stations }) {
             );
             setTotalDelay(Math.floor(total / 60));
             console.log('==> [Interruptions] Total Delay:', total);
-            // Start timer for active interruption
+
             const activeInterruption = data.find((i) => !i.end_time);
             if (activeInterruption) {
               startInterruptionTimer(activeInterruption.id);
@@ -146,7 +141,6 @@ export function useJourney({ trainCode, stations }) {
     };
   }, [journeyId]);
 
-  // Subscribe to reached stations
   useEffect(() => {
     if (!journeyId) return;
     console.log('==> Subscribing to reached stations for journey:', journeyId);
@@ -279,23 +273,22 @@ export function useJourney({ trainCode, stations }) {
     if (!journeyId) return null;
 
     console.log('Step 1: Fetch the latest interruption');
-    const { data: latestInterruption, error: fetchError } = await supabase
+    const { data: latestInterruptions, error: fetchError } = await supabase
       .from('journey_interruptions')
       .select('*')
       .eq('journey_id', journeyId)
       .order('start_time', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
+    const latestInterruption = latestInterruptions?.[0];
     if (fetchError) {
       console.error('Error fetching latest interruption:', fetchError);
       return null;
     }
-
     console.log('Latest Interruption:', latestInterruption);
 
     console.log('Step 2: End the latest interruption if it exists');
-    if (latestInterruption) {
+    if (latestInterruption && !latestInterruption.end_time) {
       await recordInterruptionEnd(latestInterruption.id);
     }
 
@@ -352,20 +345,7 @@ export function useJourney({ trainCode, stations }) {
     }
   };
 
-  const getAllInterruptions = async () => {
-    if (!journeyId) return [];
-
-    const { data } = await supabase
-      .from('journey_interruptions')
-      .select()
-      .eq('journey_id', journeyId)
-      .order('start_time', { ascending: true });
-
-    return data || [];
-  };
-
   const recordCurrentStation = async (station) => {
-    //console.log('==> Recording current station:', station);
     setCurrentStation(station);
     if (!journeyId) return;
 
@@ -402,15 +382,6 @@ export function useJourney({ trainCode, stations }) {
 
     setNextStation(station);
   };
-  // console.log('');
-  // console.log('');
-  // console.log('\n--------- HOOK ------------');
-  // console.log('Current Station', currentStation);
-  // console.log('Journey:', journeyId, currentStation);
-  // console.log('Reached Stations:', reachedStations);
-  // console.log('Interruptions:', interruptions);
-  // console.log('Total Delay:', totalDelay);
-  // console.log('\n--------- END HOOK ------------');
 
   return {
     journeyId,
