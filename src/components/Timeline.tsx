@@ -343,7 +343,7 @@ export const Timeline = ({ stations, trainCode, crew }) => {
       createTimelineEvents();
     }
   }, [journeyId, interruptions, groupedStations]);
-
+  console.log('interruptions', interruptions);
   return (
     <div className='min-h-screen bg-gray-50'>
       <InterruptionModal
