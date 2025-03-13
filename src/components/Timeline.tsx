@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+'use client';
+
+import { useState, useEffect } from 'react';
 import {
   Clock,
   Train,
   User,
-  AlertTriangle,
   Play,
   Pause,
   MapPin,
@@ -12,26 +13,10 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { InterruptionModal } from './InterruptionModal';
-import { useJourney } from '../hooks/useJourney';
-import {
-  format,
-  addSeconds,
-  startOfMinute,
-  addMinutes,
-  isValid,
-} from 'date-fns';
+import { DelayTimer } from './DelayTimer';
+import { format } from 'date-fns';
 import moment from 'moment';
-import {
-  isEmpty,
-  isNil,
-  keys,
-  sort,
-  toPairs,
-  pipe,
-  values,
-  sortBy,
-  sortWith,
-} from 'ramda';
+import { isEmpty, isNil } from 'ramda';
 
 const exists = (i) => !isEmpty(i) && !isNil(i);
 
@@ -60,13 +45,19 @@ const isTimeInPast = (timeStr) => {
   return now.isAfter(timeToCheck);
 };
 
-export const Timeline = ({ stations, trainCode, crew }) => {
+export const Timeline = ({ stations, journey, crew }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expectedStation, setExpectedStation] = useState(null);
   const [trainEvents, setTrainEvents] = useState([]);
   const [expandedSegments, setExpandedSegments] = useState(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [hasMounted, setHasMounted] = useState(false);
+  const [journeyStarted, setJourneyStarted] = useState(false);
+  const [hasStartedJourney, setHasStartedJourney] = useState(false);
+  const [hasInitializedJourney, setHasInitializedJourney] = useState(false);
+  const [hasPerformedInitialStart, setHasPerformedInitialStart] =
+    useState(false);
 
   const trainStartMovementTime = stations[0].departureTime;
 
@@ -83,104 +74,10 @@ export const Timeline = ({ stations, trainCode, crew }) => {
     recordNextStation,
     getInterruptions,
     initializeJourney,
-  } = useJourney({ trainCode, stations });
+    startNewJourney,
+  } = journey;
 
-  useEffect(() => {
-    if (isInitialLoad && trainEvents && Object.keys(trainEvents).length > 0) {
-      const currentMoment = moment();
-      const newExpandedSegments = new Set();
-
-      Object.keys(trainEvents).forEach((timeSegment) => {
-        const segmentTime = moment(timeSegment, 'HH:mm');
-        if (segmentTime.isAfter(currentMoment)) {
-          newExpandedSegments.add(timeSegment);
-        }
-      });
-
-      setExpandedSegments(newExpandedSegments);
-      setIsInitialLoad(false);
-    }
-  }, [trainEvents, isInitialLoad]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      console.log('refreshing interval...');
-
-      const now = new Date();
-      setCurrentTime(now);
-
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const expected = stations.find((station) => {
-        const stationTime = getTimeInMinutes(station.arrivalTime);
-        const nextStation = stations[stations.indexOf(station) + 1];
-        const nextStationTime = nextStation
-          ? getTimeInMinutes(nextStation.arrivalTime)
-          : Infinity;
-        return (
-          currentMinutes >= stationTime && currentMinutes < nextStationTime
-        );
-      });
-
-      setExpectedStation(expected);
-
-      if (expectedStation) {
-        const stationIndex = stations.findIndex(
-          (s) => s.code === expectedStation.code
-        );
-        const nextStation = stations[stationIndex + 1];
-
-        recordCurrentStation(expectedStation);
-        recordNextStation(nextStation);
-
-        if (nextStation) {
-          const nextStationTime = getTimeInMinutes(nextStation.arrivalTime);
-          const currentTimeMinutes = getTimeInMinutes(format(now, 'HH:mm'));
-
-          if (
-            currentTimeMinutes >= nextStationTime &&
-            !reachedStations.has(nextStation.code)
-          ) {
-            recordStationReached(nextStation);
-          }
-        }
-      }
-
-      createTimelineEvents();
-    }, 5000);
-
-    return () => clearInterval(timer);
-  }, [expectedStation, stations, reachedStations]);
-
-  const handleInterruption = async (reason) => {
-    console.log('recording interruption...');
-    await recordInterruption(reason);
-    setIsModalOpen(false);
-    await getInterruptions();
-    createTimelineEvents();
-  };
-
-  const toggleSegment = (timeSegment) => {
-    setExpandedSegments((prev) => {
-      const newExpandedSegments = new Set(prev);
-      if (newExpandedSegments.has(timeSegment)) {
-        newExpandedSegments.delete(timeSegment);
-      } else {
-        newExpandedSegments.add(timeSegment);
-      }
-      return newExpandedSegments;
-    });
-  };
-
-  if (!stations?.length || !crew?.length) {
-    return (
-      <div className='min-h-screen flex items-center justify-center bg-gray-50'>
-        <div className='animate-pulse flex flex-col items-center'>
-          <Train className='w-12 h-12 text-blue-500 mb-4' />
-          <p className='text-gray-600'>Loading journey information...</p>
-        </div>
-      </div>
-    );
-  }
+  const activeInterruption = interruptions.find((i) => !i.end_time);
 
   const adjustedStations = stations.map((station) => ({
     ...station,
@@ -202,14 +99,6 @@ export const Timeline = ({ stations, trainCode, crew }) => {
     groups[segmentKey].push(station);
     return groups;
   }, {});
-
-  const activeInterruption = interruptions.find((i) => !i.end_time);
-
-  const endCurrentInteruption = async () => {
-    await recordInterruptionEnd(activeInterruption.id);
-    await getInterruptions();
-    createTimelineEvents();
-  };
 
   const normalizeTimeRelativeToStart = (time, startTime) => {
     const [startHours] = startTime.split(':').map(Number);
@@ -244,9 +133,10 @@ export const Timeline = ({ stations, trainCode, crew }) => {
           const startTimeStr = moment(interruption.start_time).format('HH:mm');
           const endTimeStr = interruption.end_time
             ? moment(interruption.end_time).format('HH:mm')
-            : startTimeStr;
+            : null;
 
-          return [
+          // Create the start event
+          const events = [
             {
               time: startTimeStr,
               normalizedTime: normalizeTimeRelativeToStart(
@@ -257,7 +147,11 @@ export const Timeline = ({ stations, trainCode, crew }) => {
               category: 'interruption',
               interruption,
             },
-            {
+          ];
+
+          // Only add end event if it exists
+          if (endTimeStr) {
+            events.push({
               time: endTimeStr,
               normalizedTime: normalizeTimeRelativeToStart(
                 endTimeStr,
@@ -266,8 +160,10 @@ export const Timeline = ({ stations, trainCode, crew }) => {
               type: 'end',
               category: 'interruption',
               interruption,
-            },
-          ];
+            });
+          }
+
+          return events;
         })
       : [];
 
@@ -327,22 +223,213 @@ export const Timeline = ({ stations, trainCode, crew }) => {
       return acc;
     }, {});
 
-    setTrainEvents(sortTimeSegments(groupedEvents));
+    // Update train events while preserving expanded segments
+    const sortedEvents = sortTimeSegments(groupedEvents);
+    setTrainEvents(sortedEvents);
   };
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const newExpandedSegments = new Set();
+    if (isInitialLoad && trainEvents && Object.keys(trainEvents).length > 0) {
+      const currentMoment = moment();
+
+      Object.keys(trainEvents).forEach((timeSegment) => {
+        const segmentTime = moment(timeSegment, 'HH:mm');
+        if (segmentTime.isAfter(currentMoment)) {
+          newExpandedSegments.add(timeSegment);
+        }
+      });
+    }
+
+    setExpandedSegments(newExpandedSegments);
+    setIsInitialLoad(false);
+  }, [trainEvents, isInitialLoad]);
+
+  useEffect(() => {
+    let timerId;
+
+    const updateData = () => {
+      console.log('refreshing interval...');
+
+      const now = new Date();
+      setCurrentTime(now);
+
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const expected = stations.find((station) => {
+        const stationTime = getTimeInMinutes(station.arrivalTime);
+        const nextStation = stations[stations.indexOf(station) + 1];
+        const nextStationTime = nextStation
+          ? getTimeInMinutes(nextStation.arrivalTime)
+          : Number.POSITIVE_INFINITY;
+        return (
+          currentMinutes >= stationTime && currentMinutes < nextStationTime
+        );
+      });
+
+      setExpectedStation(expected);
+
+      // Only update station-related data on interval, not UI state
+      if (expected) {
+        const stationIndex = stations.findIndex(
+          (s) => s.code === expected.code
+        );
+        const nextStation = stations[stationIndex + 1];
+
+        recordCurrentStation(expected);
+        recordNextStation(nextStation);
+
+        if (nextStation) {
+          const nextStationTime = getTimeInMinutes(nextStation.arrivalTime);
+          const currentTimeMinutes = getTimeInMinutes(format(now, 'HH:mm'));
+
+          if (
+            currentTimeMinutes >= nextStationTime &&
+            !reachedStations.has(nextStation.code)
+          ) {
+            recordStationReached(nextStation);
+          }
+        }
+      }
+    };
+
+    updateData(); // Run immediately
+
+    timerId = setInterval(updateData, 5000);
+
+    return () => clearInterval(timerId);
+  }, [
+    stations,
+    reachedStations,
+    recordCurrentStation,
+    recordNextStation,
+    recordStationReached,
+  ]);
+
+  useEffect(() => {
+    // Only recreate timeline events when the underlying data changes
+    // not on every timer tick
+    createTimelineEvents();
+  }, [interruptions, reachedStations, journeyId, stations]);
 
   useEffect(() => {
     getInterruptions();
   }, [journeyId]);
 
   useEffect(() => {
-    if (
-      !exists(trainEvents) &&
-      exists(interruptions) &&
-      exists(groupedStations)
-    ) {
+    if (exists(interruptions) && exists(groupedStations)) {
       createTimelineEvents();
     }
   }, [journeyId, interruptions, groupedStations]);
+
+  useEffect(() => {
+    if (
+      stations &&
+      expectedStation &&
+      !hasStartedJourney &&
+      !hasInitializedJourney &&
+      !hasPerformedInitialStart
+    ) {
+      startNewJourney(expectedStation);
+      setHasStartedJourney(true);
+      setHasInitializedJourney(true);
+      setHasPerformedInitialStart(true);
+    }
+  }, [
+    expectedStation,
+    stations,
+    startNewJourney,
+    hasStartedJourney,
+    hasInitializedJourney,
+    hasPerformedInitialStart,
+  ]);
+
+  if (!stations?.length || !crew?.length || !hasMounted) {
+    return (
+      <div className='min-h-screen flex items-center justify-center bg-gray-50'>
+        <div className='animate-pulse flex flex-col items-center'>
+          <Train className='w-12 h-12 text-blue-500 mb-4' />
+          <p className='text-gray-600'>Loading journey information...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const endCurrentInteruption = async () => {
+    await recordInterruptionEnd(activeInterruption.id);
+    await getInterruptions();
+    createTimelineEvents();
+  };
+
+  const handleInterruption = async (reason, severity) => {
+    console.log('recording interruption...', reason, severity);
+    try {
+      await recordInterruption(reason, severity, journeyId);
+      setIsModalOpen(false);
+      await getInterruptions();
+      createTimelineEvents();
+    } catch (error) {
+      console.error('Failed to record interruption:', error);
+      alert('Failed to record interruption. Please try again.');
+    }
+  };
+
+  const toggleSegment = (timeSegment) => {
+    setExpandedSegments((prev) => {
+      const newExpandedSegments = new Set(prev);
+      if (newExpandedSegments.has(timeSegment)) {
+        newExpandedSegments.delete(timeSegment);
+      } else {
+        newExpandedSegments.add(timeSegment);
+      }
+      return newExpandedSegments;
+    });
+  };
+
+  const getInterruptionStatusBadge = (interruption) => {
+    if (!interruption.end_time) {
+      return (
+        <span className='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-transnet-red text-white'>
+          Active
+        </span>
+      );
+    }
+
+    const delayMinutes = Math.floor(interruption.time_delayed_in_seconds / 60);
+    return (
+      <span className='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800'>
+        {delayMinutes} min delay
+      </span>
+    );
+  };
+
+  const getSeverityBadge = (severity) => {
+    switch (severity) {
+      case 'high':
+        return (
+          <span className='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-transnet-red text-white'>
+            High
+          </span>
+        );
+      case 'medium':
+        return (
+          <span className='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-500 text-white'>
+            Medium
+          </span>
+        );
+      case 'low':
+      default:
+        return (
+          <span className='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-500 text-white'>
+            Low
+          </span>
+        );
+    }
+  };
+
   console.log('interruptions', interruptions);
   return (
     <div className='min-h-screen bg-gray-50'>
@@ -350,9 +437,18 @@ export const Timeline = ({ stations, trainCode, crew }) => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onConfirm={handleInterruption}
+        currentStation={expectedStation}
       />
 
       <div className='max-w-7xl mx-auto px-4 py-8'>
+        {/* Delay Timer Component */}
+        {/* <DelayTimer
+          totalDelay={totalDelay}
+          activeInterruption={activeInterruption}
+          className="mb-6"
+          interruptions={interruptions}
+        /> */}
+
         <div className='bg-white rounded-xl shadow-lg p-6 mb-8 transition-all duration-300 hover:shadow-xl'>
           <div className='flex items-center justify-between mb-6'>
             <div className='flex items-center space-x-6'>
@@ -381,15 +477,6 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                   {format(currentTime, 'HH:mm:ss')}
                 </span>
               </div>
-
-              {totalDelay > 0 && (
-                <div className='bg-transnet-red/10 px-6 py-3 rounded-lg flex items-center'>
-                  <AlertTriangle className='w-5 h-5 text-transnet-red mr-3' />
-                  <span className='font-medium text-transnet-red'>
-                    Delay: {totalDelay} min
-                  </span>
-                </div>
-              )}
 
               {activeInterruption ? (
                 <button
@@ -506,6 +593,9 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                                 >
                                   {event.type}
                                 </span>
+                                {event.category === 'interruption' &&
+                                  event.interruption.severity &&
+                                  getSeverityBadge(event.interruption.severity)}
                               </div>
                               <p
                                 className={`text-sm ${
@@ -517,10 +607,21 @@ export const Timeline = ({ stations, trainCode, crew }) => {
                                 {event.time}
                               </p>
                               {event.category === 'interruption' && (
-                                <p className='text-sm text-transnet-red mt-2'>
-                                  Reason:{' '}
-                                  {event.interruption.interruption_reason}
-                                </p>
+                                <div className='space-y-1'>
+                                  <p className='text-sm text-transnet-red'>
+                                    Reason:{' '}
+                                    {event.interruption.interruption_reason}
+                                  </p>
+                                  {event.interruption.location_description && (
+                                    <p className='text-sm text-gray-600'>
+                                      Location:{' '}
+                                      {event.interruption.location_description}
+                                    </p>
+                                  )}
+                                  {getInterruptionStatusBadge(
+                                    event.interruption
+                                  )}
+                                </div>
                               )}
                             </div>
                             <div>
